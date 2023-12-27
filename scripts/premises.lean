@@ -3,6 +3,7 @@ import Mathlib.Control.Basic
 import Mathlib.Lean.Expr.Basic
 import Std.Lean.HashMap
 import Std.Lean.Util.Path
+import Cli
 
 /-!
 Generate declaration dependencies up to a target file (defaulting to all of Mathlib).
@@ -102,13 +103,15 @@ def allExplicitConstants : MetaM (NameMap NameSet) := do
       result := result.insert n (← c.explicitConstants)
   return result
 
-def main (args : List String) : IO UInt32 := do
+def runPremisesCmd (args : Cli.Parsed) : IO UInt32 := do
   let options := Options.empty.insert `maxHeartbeats (0 : Nat)
-  let modules := match args with
-  | [] => #[`Mathlib]
-  | args => args.toArray.map fun s => s.toName
+  let modules : Array String := args.variableArgsAs! String
+  let modules := match modules with
+  | #[] => #[`Mathlib]
+  | args => args.map fun s => s.toName
   searchPathRef.set compile_time_search_path%
   CoreM.withImportModules modules (options := options) do
+    let env ← getEnv
     let allConstants ← allUsedConstants
     let explicitConstants ← MetaM.run' allExplicitConstants
     for (n, (d, u)) in allConstants do
@@ -120,14 +123,41 @@ def main (args : List String) : IO UInt32 := do
       | "Aesop" :: _ => continue
       | components => if components.contains "Tactic" then continue
       let explicit := explicitConstants.find? n |>.getD ∅
-      IO.println "---"
-      IO.println n
-      for m in d do
-        if explicit.contains m then
-          IO.println s!"* {m}"
-        else
-          IO.println s!"  {m}"
-      for m in u do
-        if ! d.contains m then
-          IO.println s!"s {m}"
+      if args.hasFlag "json" then
+        let j : Json := .mkObj [
+          ("decl", toJson n),
+          ("premises", toJson <| d.fold (fun as a => as.push <| Json.mkObj [
+            ("name", toJson a)
+          ]) #[])
+        ]
+        IO.println j.compress
+      else
+        IO.println "---"
+        IO.println n
+        for m in d do
+          if explicit.contains m then
+            if args.hasFlag "expr" then
+              let some e := env.find? m | unreachable!
+              let q ← MetaM.run' <| ppExpr e.type
+              IO.println <| q.pretty 1000000
+            IO.println s!"* {m}"
+          else
+            IO.println s!"  {m}"
+        for m in u do
+          if ! d.contains m then
+            IO.println s!"s {m}"
   return 0
+
+def premisesCmd : Cli.Cmd := `[Cli|
+  premisesCmd VIA runPremisesCmd; ["0.0.1"]
+  "TODO"
+
+  FLAGS:
+    e, expr; "Include exprs of types of premises."
+    j, json; "Use JSON (formatted on a single line) to output data."
+
+  ARGS:
+    ...modules : String; "Modules to process. Defaults to all of mathlib."
+]
+
+def main (args : List String) : IO UInt32 := premisesCmd.validate args

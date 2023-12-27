@@ -37,11 +37,14 @@ lean_exe comment_data where
 @[default_target]
 lean_exe premises where
   root := `scripts.premises
+  supportInterpreter := true
 
 @[default_target]
 lean_exe declaration_types where
   root := `scripts.declaration_types
+  supportInterpreter := true
 
 @[default_target]
 lean_exe goal_comments where
   root := `scripts.goal_comments
+  supportInterpreter := true
