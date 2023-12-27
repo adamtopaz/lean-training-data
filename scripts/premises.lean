@@ -124,12 +124,18 @@ def runPremisesCmd (args : Cli.Parsed) : IO UInt32 := do
       | components => if components.contains "Tactic" then continue
       let explicit := explicitConstants.find? n |>.getD ∅
       if args.hasFlag "json" then
-        let j : Json := .mkObj [
+        let ds : Array Json ← d.foldM (fun as a => return as.push (.mkObj <| ← processD explicit a)) #[]
+        let us : NameSet := u.fold (fun t x => if d.contains x then t else t.insert x) ∅
+        let us : Array Json ← us.foldM (fun as a => return as.push (.mkObj <| ← processU a)) #[]
+        let j : Json := .mkObj <| [
           ("decl", toJson n),
-          ("premises", toJson <| d.fold (fun as a => as.push <| Json.mkObj [
-            ("name", toJson a)
-          ]) #[])
-        ]
+          ("premises", toJson <| ds ++ us)
+        ] ++ (← do
+          unless args.hasFlag "expr" do return []
+          let some t := env.find? n | return []
+          let tp := t.type
+          let tp ← MetaM.run' (ppExpr tp)
+          return [("expr", toJson <| tp.pretty 1000000)])
         IO.println j.compress
       else
         IO.println "---"
@@ -147,6 +153,25 @@ def runPremisesCmd (args : Cli.Parsed) : IO UInt32 := do
           if ! d.contains m then
             IO.println s!"s {m}"
   return 0
+where
+  processD es x := do
+    let init := [("name",toJson x), ("simp", false), ("explicit", es.contains x)]
+    unless args.hasFlag "expr" do return init
+    let env ← getEnv
+    let some t := env.find? x | return init
+    let tp := t.type
+    let tp ← MetaM.run' (ppExpr tp)
+    let tp := tp.pretty 1000000
+    return init ++ [("expr", toJson tp)]
+  processU x := do
+    let init := [("name", toJson x), ("simp", true), ("explicit", false)]
+    unless args.hasFlag "expr" do return init
+    let env ← getEnv
+    let some t := env.find? x | return init
+    let tp := t.type
+    let tp ← MetaM.run' (ppExpr tp)
+    let tp := tp.pretty 1000000
+    return init ++ [("expr", toJson tp)]
 
 def premisesCmd : Cli.Cmd := `[Cli|
   premisesCmd VIA runPremisesCmd; ["0.0.1"]
